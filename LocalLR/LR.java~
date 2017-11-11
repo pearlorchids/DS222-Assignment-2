@@ -1,0 +1,308 @@
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+
+public class LR {
+	
+	static int numWords = 1000;
+	static double eta = 0.003125;
+	static double lambda_ = 0.00058;
+	static int numEpochs = 5;
+	static double [] loss = new double [numEpochs];
+	static String[] targetLabels = { "American_film_directors", "Articles_containing_video_clips", "English-language_journals", "Windows_games", "American_people_of_Irish_descent", "Deaths_from_myocardial_infarction", "Guggenheim_Fellows", "Columbia_University_alumni", "Fellows_of_the_Royal_Society", "Major_League_Baseball_pitchers", "Harvard_University_alumni", "American_male_film_actors", "English-language_television_programming", "American_film_actresses", "American_male_television_actors", "American_films", "English-language_films", "Black-and-white_films", "American_drama_films", "Yale_University_alumni", "English-language_albums", "American_television_actresses", "American_comedy_films", "The_Football_League_players", "English_footballers", "British_films", "American_military_personnel_of_World_War_II", "Association_football_goalkeepers", "Serie_A_players", "Italian_footballers", "Association_football_midfielders", "Association_football_forwards", "English_cricketers", "Scottish_footballers", "French_films", "Insects_of_Europe", "Italian_films", "German_footballers", "Indian_films", "Main_Belt_asteroids", "Asteroids_named_for_people", "Rivers_of_Romania", "Russian_footballers", "Villages_in_the_Czech_Republic", "Association_football_defenders", "Australian_rules_footballers_from_Victoria_(Australia)", "Hindi-language_films", "Brazilian_footballers", "Villages_in_Turkey" };	
+	static Map<Integer, double[]> wVectors = new HashMap<>();
+	static Map<Integer, int[]> Aks = new HashMap<>();
+	private static double overfl = 30;
+	
+	
+	private Map<Integer, Integer> getHashedFeatures(String curDoc) {
+		
+		String[] keyValPair = curDoc.split("\\s+");
+		Map<Integer, Integer> hashedFeatures = new HashMap<>();
+		
+		for (int i = 0; i < keyValPair.length; i++) {
+				String[] str = keyValPair[i].split(",");
+				//System.out.println(keyValPair[i]);
+				if(str[0].length()>0)
+				{
+				   hashedFeatures.put(Integer.parseInt(str[0]), (int)Float.parseFloat(str[1]));
+				}
+			
+		}
+		return hashedFeatures;
+	}
+
+	private int[] getLabelsVector(String labelString, String[] targetLabels) {
+		int[] labels = new int[targetLabels.length];
+		for (int i = 0; i < targetLabels.length; i++) {
+			labels[i] = labelString.contains(targetLabels[i]) ? 1 : 0;
+		}
+		return labels;
+	}
+
+	private double logistic(double score) {
+		if (Math.abs(score) > overfl) {
+			score = Math.signum(score) * overfl;
+		}
+		return 1 / (1 + Math.exp(-score));
+	}
+	
+	private double[] docPred(Map<Integer, Integer> hashedFeatures) {
+		int nLabels = targetLabels.length;
+		double []bias = wVectors.get(-1);
+		double[] prob = new double[nLabels];
+		
+		for (int i = 0; i < nLabels; i++) {
+			prob[i] = bias[i];
+		}
+		
+		for (Integer hashVal : hashedFeatures.keySet()) {
+			int count = hashedFeatures.get(hashVal);
+			
+			if (wVectors.containsKey(hashVal)) {
+				double[] w = wVectors.get(hashVal);
+				for (int i = 0; i < nLabels; i++) {
+					prob[i] += w[i] * count;
+				}
+			}
+		}
+
+		for (int i = 0; i < nLabels; i++) {
+			prob[i] = logistic(prob[i]);
+		}
+		return prob;
+	}
+	
+	private void gradientUpdate(int[] labelVector, Map<Integer, Integer> hashedFeatures, int counter) {
+		int nLabels = targetLabels.length;
+
+		
+		double[] predProb = docPred(hashedFeatures);
+		
+		
+		double []bias = wVectors.get(-1).clone();
+		for (int i = 0; i < nLabels; i++) {
+			bias[i] += eta * (labelVector[i] - predProb[i]);
+		}
+		wVectors.put(-1, bias);
+		
+		for (Integer hashVal : hashedFeatures.keySet()) {
+			int count = hashedFeatures.get(hashVal);
+			
+			double[] w = new double[nLabels];
+			int[] lazyUpdateParams = new int[nLabels];
+			
+			
+			if (wVectors.containsKey(hashVal)) {
+				
+				w = wVectors.get(hashVal).clone();
+				if (Aks.containsKey(hashVal)) {
+					lazyUpdateParams = Aks.get(hashVal).clone();
+				}
+				
+				for (int i = 0; i < nLabels; i++) {
+					w[i] *= Math.pow (1 - 2 * eta * lambda_, counter - lazyUpdateParams[i]);
+				}
+			}
+				
+			
+			
+			for (int i = 0; i < nLabels; i++) {
+				w[i] += eta * (labelVector[i] - predProb[i]) * count;
+				lazyUpdateParams[i] = counter;
+			}
+			wVectors.put(hashVal, w);
+			Aks.put(hashVal, lazyUpdateParams);
+		}
+	}
+	
+	public void trainLR(String train) throws IOException{
+		
+		int counter = 0;
+		double l =0;
+		int j=0;
+		for (int i = 1; i <= numEpochs; i++) {
+			l = 0;
+			System.out.println(i);
+			//eta = eta / (i);
+			eta = eta * (i);
+			BufferedReader br = new BufferedReader(new FileReader(train));
+			String document;
+			while ((document = br.readLine()) != null) {
+				
+				counter += 1;
+				String label = document.split("\\s", 2)[0];
+				int[] labelVector = getLabelsVector(label, targetLabels);
+				/*
+				System.out.println(Arrays.toString(labelVector));
+				j++;
+				if(j==3)
+				{
+					System.exit(0);
+				
+				
+				}
+				*/
+				
+				Map<Integer, Integer> hashedFeatures = getHashedFeatures(document.split("\\s", 2)[1]);
+			
+				gradientUpdate(labelVector, hashedFeatures, counter);
+			}
+			l = calcLoss(train);
+			loss[i-1] = l;
+			lazyUpdate(counter);
+			br.close();
+		}
+		/*
+		
+	}
+	
+	private double calcLoss(String train) throws IOException
+	{
+		double l=0;
+		int lab;
+		int count = 0;
+		double prob = 0;
+		double normsW = 0;
+		BufferedReader br = new BufferedReader(new FileReader(train));
+		String document;
+		while ((document = br.readLine()) != null) {
+			String label = document.split("\\s", 2)[0];
+			int[] labelVector = getLabelsVector(label, targetLabels);
+			Map<Integer, Integer> hashedFeatures = getHashedFeatures(document.split("\\s", 2)[1]);
+			lab = java.util.Arrays.asList(targetLabels).indexOf(label);
+			//System.out.println(label+" "+lab);
+			if(lab>=0)
+			{
+				prob = docPredLabel(hashedFeatures, lab);
+				//System.out.println("prob = "+prob);
+				l = l + Math.log(prob);
+				count = count + 1;
+			}			
+		}
+		br.close();
+		normsW = calcNormsW();
+		l = -(1/count)*l + lambda_*normsW;
+		//System.out.println("Loss = "+l);
+		//System.out.println(prob+" "+l);
+		return l;
+	}
+
+	private double calcNormsW()
+	{
+		double w[];
+		double norms = 0;
+		for (Map.Entry<Integer, double[]> entry : wVectors.entrySet()) {
+		     w = entry.getValue();
+		     for(int i=0;i<w.length;i++)
+		     {
+		    	 norms = norms + w[i]*w[i];
+		     }
+		}
+		return norms;
+	}
+	
+	private double docPredLabel(Map<Integer, Integer> hashedFeatures, int label) {
+		int nLabels = targetLabels.length;
+		double []bias = wVectors.get(-1);
+		double [] prob = new double[targetLabels.length];
+		double normW = 0;
+		double sumprob = 0;
+		for(int i=0;i<targetLabels.length;i++)
+			prob[i] = bias[i];
+		
+		for(int i=0;i<targetLabels.length;i++)
+		{
+		for (Integer hashVal : hashedFeatures.keySet()) {
+			int count = hashedFeatures.get(hashVal);
+			
+			if (wVectors.containsKey(hashVal)) {
+				double[] w = wVectors.get(hashVal);
+					prob[i] += w[i] * count;
+				
+			}
+		}
+		}
+		for(int i=0;i<targetLabels.length;i++)
+		{
+			prob[i] = Math.exp(prob[i]);
+			sumprob += prob[i];
+		}
+		
+		return(prob[label]/sumprob);
+	}
+	
+	private void lazyUpdate(int counter) {
+
+		for (Integer hashVal : wVectors.keySet()) {
+			// skip bias term
+			if (hashVal < 0) {
+				continue;
+			}
+			
+			double[] w = wVectors.get(hashVal).clone();
+			int[] lazyUpdateParams = Aks.get(hashVal).clone();
+
+			for (int i = 0; i < targetLabels.length; i++) {
+				w[i] *= Math.pow(1 - 2 * eta * lambda_, counter - lazyUpdateParams[i]);
+				lazyUpdateParams[i] = counter;
+			}
+			wVectors.put(hashVal, w);
+			Aks.put(hashVal, lazyUpdateParams);
+		}
+	}
+
+	public void testLR(String test) throws IOException {
+		
+		int accuracy = 0, totalDoc = 0;
+		
+		BufferedReader br = new BufferedReader(new FileReader(test));
+		String testDoc;
+		while ((testDoc = br.readLine()) != null) {
+			String label = testDoc.split("\\s", 2)[0];
+			Map<Integer, Integer> hashedFeatures = getHashedFeatures(testDoc.split("\\s", 2)[1]);
+			double[] predictions = docPred(hashedFeatures);
+			int[] labels = getLabelsVector(label,targetLabels);
+			int argmax = 0; 
+			double maxVal = 0;
+			for (int i = 0; i < targetLabels.length; i++) {
+				if ( predictions[i] > maxVal) {
+					maxVal = predictions[i];
+					argmax = i;
+				}
+			}
+			
+			if (labels[argmax] == 1) {
+				accuracy += 1;
+			}
+			totalDoc = totalDoc + 1;
+		}
+		System.out.println(accuracy);
+		System.out.println(totalDoc);
+		System.out.println((double)accuracy / totalDoc);
+		br.close();
+	}
+
+		public static void main(String []args) throws IOException {
+			String train = new String(args[0]);
+			String test = new String(args[1]);
+			LR obj = new LR();
+			wVectors.put(-1, new double[targetLabels.length]);
+			obj.trainLR(train);
+			obj.testLR(test);
+			obj.testLR(train);
+			FileWriter fw=new FileWriter("loss.txt");   
+			for(int i=0;i<numEpochs;i++)
+			{
+				fw.write(loss[i]+" ");  
+				System.out.println(loss[i]);
+			}
+	        fw.close();    
+	
+		}
+	
+}
